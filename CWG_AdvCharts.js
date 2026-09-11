@@ -3,7 +3,7 @@
 // 6-GAME INTEGRATION WITH PERSISTENT LOGIC & ANIMATIONS
 // ADDED: Active Highlighting for Pick 2 & Pick 4 (matching combinations)
 // ADDED: Carousel for previous weeks/months ABOVE fixed current week/month
-// Last Modified: Sept 11 @ 7:20 am
+// Last Modified: Sept 11 @ 2:30 pm
 //========================================
 const TICKER_URL = "https://script.google.com/macros/s/AKfycbymSUZ3cuBP7wZSKkxs8QmjMkKP6q3j-LOW_CVpY3n6Sw1EzsdwPu6yTEkpOmiAJz95/exec";
 const COMPARISON_API = "https://script.google.com/macros/s/AKfycbwyr-M_ZzIscNgxJmR_UYHgZqmamn62Np4msDFaCjX9KgyUmyjuzuIYbawBmT0_mw4j/exec?action=calendar";
@@ -3538,6 +3538,278 @@ function renderPlayWheFiveChartsv2(weeksData) {
         updateDots();
       })();
     </script>
+  `;
+}
+//////////////////////////////////////////
+// ======================================
+// 3-YEAR HISTORICAL COMPARISON — PLAY WHE, PICK 2, PICK 4
+// Looks back 3 years (excluding current year) for the current day + month
+// and shows what was drawn on this exact date in each slot
+// Sub-headers replace MOR/MID/NON/EVE with time labels
+// ======================================
+function renderThreeYearHistory(pwWeeks, p2Weeks, p4Weeks) {
+  // ======================================
+  // TIME LABELS
+  // ======================================
+  const slotLabels = {
+    MOR: "10:30 AM",
+    MID: "1:00 PM",
+    NON: "4:00 PM",
+    EVE: "7:00 PM"
+  };
+  const slotOrder = ["MOR", "MID", "NON", "EVE"];
+
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const now = new Date();
+  const todayDay = now.getDate();
+  const todayMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const dayOfWeek = dayNames[now.getDay()];
+
+  // ======================================
+  // HELPERS
+  // ======================================
+  function parseWeekStart(str) {
+    if (!str) return null;
+    const parts = str.split(" ");
+    const monthMap = {"Jan":0,"Feb":1,"Mar":2,"Apr":3,"May":4,"Jun":5,"Jul":6,"Aug":7,"Sep":8,"Oct":9,"Nov":10,"Dec":11};
+    return new Date(parts[2], monthMap[parts[1]], parseInt(parts[0]));
+  }
+
+  function formatMonthDay(date) {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const d = date.getDate();
+    const m = months[date.getMonth()];
+    const y = date.getFullYear();
+    const dow = dayNames[date.getDay()].slice(0, 3);
+    return `${dow} ${d} ${m} ${y}`;
+  }
+
+  function getDraw(week, dayName, slot) {
+    if (!week) return null;
+    const day = week.days.find(d => d.dayName === dayName);
+    if (!day) return null;
+    const val = day.draws[slot];
+    return val && val !== "-" && val !== "PENDING" && val !== "HOLIDAY" ? val.toString() : null;
+  }
+
+  // ======================================
+  // FIND DRAWS FOR CURRENT DAY + MONTH — EXCLUDING CURRENT YEAR
+  // ======================================
+  // Returns array of { year, date, week, weekStart } sorted newest first
+  function findHistoricalDrawsForToday(weeks) {
+    if (!weeks || weeks.length === 0) return [];
+    const found = [];
+    const seenYears = new Set();
+
+    weeks.forEach(week => {
+      const weekStart = parseWeekStart(week.startDate);
+      if (!weekStart) return;
+
+      // For each day in the week, compute its actual calendar date
+      for (let i = 0; i < week.days.length; i++) {
+        const day = week.days[i];
+        if (!day) continue;
+        const dayIdx = dayNames.indexOf(day.dayName);
+        if (dayIdx === -1) continue;
+
+        const drawDate = new Date(weekStart);
+        drawDate.setDate(weekStart.getDate() + dayIdx);
+
+        // Check if this date matches today's day-of-month AND month
+        if (drawDate.getDate() === todayDay && drawDate.getMonth() === todayMonth) {
+          const year = drawDate.getFullYear();
+
+          // EXCLUDE CURRENT YEAR
+          if (year === currentYear) continue;
+
+          if (!seenYears.has(year)) {
+            seenYears.add(year);
+            found.push({
+              year: year,
+              date: drawDate,
+              dayName: day.dayName,
+              week: week
+            });
+          }
+        }
+      }
+    });
+
+    // Sort newest year first, keep only 3 most recent prior years
+    found.sort((a, b) => b.year - a.year);
+    return found.slice(0, 3);
+  }
+
+  // ======================================
+  // RENDER ONE GAME SECTION
+  // ======================================
+  function renderGameSection(title, weeks, color, gameKey) {
+    const entries = findHistoricalDrawsForToday(weeks);
+
+    // Build table rows
+    let rowsHtml = "";
+
+    if (entries.length === 0) {
+      rowsHtml = `
+        <tr>
+          <td colspan="5" style="text-align:center; padding:10px; color:var(--text-dim,#64748b); font-size:10px;">
+            No historical data found for this date
+          </td>
+        </tr>
+      `;
+    } else {
+      entries.forEach(entry => {
+        const dateLabel = formatMonthDay(entry.date);
+        const slotCells = slotOrder.map(slot => {
+          const val = getDraw(entry.week, entry.dayName, slot);
+          return `
+            <td style="
+              padding:6px 4px;
+              text-align:center;
+              font-size:13px;
+              font-weight:800;
+              color:${val ? color : 'var(--text-dim, #64748b)'};
+              border-bottom:1px solid var(--border-color, rgba(255,255,255,0.05));
+            ">${val || '—'}</td>
+          `;
+        }).join('');
+
+        rowsHtml += `
+          <tr>
+            <td style="
+              padding:6px 6px;
+              text-align:left;
+              font-size:10px;
+              font-weight:700;
+              color:var(--text-main, #e2e8f0);
+              border-bottom:1px solid var(--border-color, rgba(255,255,255,0.05));
+              white-space:nowrap;
+            ">${dateLabel}</td>
+            ${slotCells}
+          </tr>
+        `;
+      });
+    }
+
+    return `
+      <div style="
+        background: var(--card-bg, rgba(255,255,255,0.02));
+        border-radius: 10px;
+        padding: 8px;
+        border: 1px solid var(--border-color, rgba(255,255,255,0.06));
+        margin-bottom: 8px;
+      ">
+        <!-- Game Title -->
+        <div style="
+          display:flex;
+          align-items:center;
+          gap:6px;
+          margin-bottom:6px;
+          padding-bottom:5px;
+          border-bottom:1px solid var(--border-color, rgba(255,255,255,0.06));
+        ">
+          <span style="
+            display:inline-block;
+            width:8px;
+            height:8px;
+            border-radius:50%;
+            background:${color};
+            box-shadow: 0 0 8px ${color}80;
+          "></span>
+          <span style="
+            font-size:13px;
+            font-weight:900;
+            color:var(--text-main, #ff9d00);
+            letter-spacing:0.5px;
+          ">${title} • ${currentYear}</span>
+          <span style="
+            margin-left:auto;
+            font-size:8px;
+            color:var(--text-dim, #64748b);
+          ">${entries.length} year${entries.length !== 1 ? 's' : ''} found</span>
+        </div>
+
+        <!-- Table -->
+        <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+          <table style="width:100%; border-collapse:collapse; font-size:11px;">
+            <thead>
+              <tr style="background:var(--header-bg, rgba(255,255,255,0.04));">
+                <th style="
+                  padding:6px 6px;
+                  text-align:left;
+                  font-size:9px;
+                  font-weight:800;
+                  color:var(--text-main, #ff9d00);
+                  letter-spacing:0.3px;
+                  border-bottom:1px solid var(--border-color, rgba(255,255,255,0.1));
+                ">DATE</th>
+                ${slotOrder.map(slot => `
+                  <th style="
+                    padding:6px 4px;
+                    text-align:center;
+                    font-size:9px;
+                    font-weight:800;
+                    color:var(--text-main, #ff9d00);
+                    letter-spacing:0.3px;
+                    border-bottom:1px solid var(--border-color, rgba(255,255,255,0.1));
+                    white-space:nowrap;
+                  ">${slotLabels[slot]}</th>
+                `).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  // ======================================
+  // BUILD MAIN CONTAINER
+  // ======================================
+  const todayLabel = formatMonthDay(now);
+
+  return `
+    <div style="
+      background: var(--bg-start, linear-gradient(135deg, #0f172a, #1e293b));
+      border-radius: 16px;
+      padding: 12px;
+      margin-bottom: 15px;
+      border: 1px solid var(--border-color, #ff9d00);
+    ">
+      <!-- Header -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:4px;">
+        <div>
+          <div style="font-size:14px; font-weight:800; color:var(--text-main, #ff9d00); letter-spacing:0.3px;">
+    ♠️ 3-YEAR HISTORICAL RECAP • ${currentYear}
+          </div>
+          <div style="font-size:8px; color:var(--text-dim, #64748b); margin-top:1px;">
+            ${dayOfWeek} ${todayDay} • Comparing ${currentYear - 1}, ${currentYear - 2}, ${currentYear - 3}
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:4px; font-size:6px; color:var(--text-dim, #94a3b8);">
+          <span style="color:#ff9d00; font-weight:bold; font-size:6px;">CWG ©️</span>
+        </div>
+      </div>
+
+      <!-- PLAY WHE -->
+      ${renderGameSection("PLAY WHE", pwWeeks, "#ff6b6b", "pw")}
+
+      <!-- PICK 2 -->
+      ${renderGameSection("PICK 2", p2Weeks, "#58a6ff", "p2")}
+
+      <!-- PICK 4 -->
+      ${renderGameSection("PICK 4", p4Weeks, "#32d74b", "p4")}
+
+      <!-- Footer -->
+      <div style="margin-top:6px; padding-top:4px; border-top:1px solid var(--border-color, rgba(255,255,255,0.02)); display:flex; justify-content:center; align-items:center; gap:6px; flex-wrap:wrap;">
+        <span style="font-size:7px; color:var(--text-dim, #64748b);">CodeWithGlasgow • CWG Chart Analysis ©️</span>
+        <span style="font-size:7px; color:var(--text-dim, #64748b);">${todayLabel}</span>
+      </div>
+    </div>
   `;
 }
 ///////////////////////////////////////////
@@ -9515,6 +9787,565 @@ function render20DrawMarks(marks, title, titleColor) {
   `;
 }
 ///////////////////////////////////////////
+// ======================================
+// PLAY WHE LINE RULES & MAPPING VERSION 2
+// Shows all 9 lines with their pull rules and active numbers
+// + Line Chart with last 24 weeks stats (count + last played date)
+// ======================================
+function renderPlayWheLineRulesMappingv2(weeksData) {
+  if (!weeksData || weeksData.length === 0) {
+    return `
+      <div style="background: linear-gradient(135deg, #0f172a, #1e293b); border-radius: 16px; padding: 16px; margin-bottom: 15px; border: 1px solid #58a6ff; text-align:center;">
+        📊 Loading Play Whe Line Rules...
+      </div>
+    `;
+  }
+
+  // ======================================
+  // CONSTANTS & MAPPINGS
+  // ======================================
+
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const slots = ["MOR", "MID", "NON", "EVE"];
+  const now = new Date();
+
+  const numToLineMap = {
+    1:1, 10:1, 19:1, 28:1, 2:2, 11:2, 20:2, 29:2, 3:3, 12:3, 21:3, 30:3,
+    4:4, 13:4, 22:4, 31:4, 5:5, 14:5, 23:5, 32:5, 6:6, 15:6, 24:6, 33:6,
+    7:7, 16:7, 25:7, 34:7, 8:8, 17:8, 26:8, 35:8, 9:9, 18:9, 27:9, 36:9
+  };
+
+  const lineColors = [
+    "#00f2ff", "#ff9f0a", "#32d74b", "#ff375f", 
+    "#ffd60a", "#bf5af2", "#1e90ff", "#ff1493", "#00ff7f"
+  ];
+
+  const lineNames = {
+    1: "1 Line",
+    2: "2 Line",
+    3: "3 Line",
+    4: "4 Line",
+    5: "5 Line",
+    6: "6 Line",
+    7: "7 Line",
+    8: "8 Line",
+    9: "9 Line"
+  };
+
+  const lineMembers = {
+    1: [1, 10, 19, 28],
+    2: [2, 11, 20, 29],
+    3: [3, 12, 21, 30],
+    4: [4, 13, 22, 31],
+    5: [5, 14, 23, 32],
+    6: [6, 15, 24, 33],
+    7: [7, 16, 25, 34],
+    8: [8, 17, 26, 35],
+    9: [9, 18, 27, 36]
+  };
+
+  const lineRules = {
+    1: { pulls: [5], description: "1 line does pull 5 line mainly because 5/1 is mark and spirit", related: "5/1 mark and spirit" },
+    2: { pulls: [7], description: "2 line does pull 7 line", related: "2/7 pull" },
+    3: { pulls: [7, 5], description: "3 line does play with 7 line and 5 line mostly to complete the 357 play", related: "357 play" },
+    4: { pulls: [8, 7], description: "4 line does pull 8 line and 7 line", related: "4/8/7" },
+    5: { pulls: [1, 9], description: "5 line does pull 1 line and 9 line", related: "5/1/9" },
+    6: { pulls: [6], description: "6 line does pull 6 line", related: "self-pull" },
+    7: { pulls: [7, 4], description: "7 line does pull 7 line and 4 line", related: "7/4" },
+    8: { pulls: [8, 4], description: "8 line does pull 8 line and 4 line", related: "8/4" },
+    9: { pulls: [5, 4, 8], description: "9 line does pull 5 line and 4 line and sometimes 8 line", related: "9/5/4/8" }
+  };
+
+  // ======================================
+  // HELPER FUNCTIONS
+  // ======================================
+
+  function getDraw(week, dayName, slot) {
+    if (!week) return null;
+    const day = week.days.find(d => d.dayName === dayName);
+    if (!day) return null;
+    const val = day.draws[slot];
+    return val && val !== "-" && val !== "PENDING" && val !== "HOLIDAY" ? parseInt(val, 10) : null;
+  }
+
+  function getLine(num) {
+    return numToLineMap[num] || null;
+  }
+
+  function getLineColor(num) {
+    const line = getLine(num);
+    if (line === null) return "#94a3b8";
+    return lineColors[(line - 1) % lineColors.length];
+  }
+
+  function getLineName(num) {
+    const line = getLine(num);
+    if (line === null) return "?";
+    return lineNames[line] || `Line ${line}`;
+  }
+
+  const spiritEmoji = {
+    1: "🔪", 2: "👵🏾", 3: "🚕", 4: "⚰️", 5: "👨🏾‍🦳", 6: "🤰🏽", 7: "🐗", 8: "🐯",
+    9: "🐮", 10: "🐒", 11: "🦅", 12: "🤴🏽", 13: "🐸", 14: "💰", 15: "🤧", 16: "💃🏽",
+    17: "🐦‍⬛", 18: "🚤", 19: "🐎", 20: "🐶", 21: "👄", 22: "🐀", 23: "🏡", 24: "🫅🏽",
+    25: "🐢", 26: "🐔", 27: "🐍", 28: "🐟", 29: "🍻", 30: "🐈‍⬛", 31: "👵🏾", 32: "🦐",
+    33: "🕷️", 34: "👨🏾‍🦯", 35: "🐍", 36: "🫏"
+  };
+
+  const sortedWeeks = [...weeksData].sort((a, b) => {
+    let pa = a.startDate.split(" ");
+    let pb = b.startDate.split(" ");
+    return new Date(pa[2] + "-" + pa[1] + "-" + pa[0]) - new Date(pb[2] + "-" + pb[1] + "-" + pb[0]);
+  });
+
+  const currentWeek = sortedWeeks[sortedWeeks.length - 1];
+
+  // ======================================
+  // GET LEAVING NUMBER
+  // ======================================
+
+  function getLeavingNumber() {
+    let leavingNumber = null;
+    let leavingSlot = null;
+    const todayIdx = now.getDay();
+    const currentHour = now.getHours();
+
+    let currentSlotIdx = -1;
+    if (currentHour >= 9 && currentHour < 12) currentSlotIdx = 0;
+    else if (currentHour >= 12 && currentHour < 15) currentSlotIdx = 1;
+    else if (currentHour >= 15 && currentHour < 18) currentSlotIdx = 2;
+    else if (currentHour >= 18) currentSlotIdx = 3;
+
+    for (let d = todayIdx; d >= 0; d--) {
+      const maxSlot = (d === todayIdx) ? currentSlotIdx : slots.length - 1;
+      for (let s = maxSlot; s >= 0; s--) {
+        const draw = getDraw(currentWeek, dayNames[d], slots[s]);
+        if (draw) {
+          leavingNumber = draw;
+          leavingSlot = slots[s];
+          break;
+        }
+      }
+      if (leavingNumber) break;
+    }
+
+    if (!leavingNumber) {
+      for (let w = sortedWeeks.length - 2; w >= 0; w--) {
+        const week = sortedWeeks[w];
+        for (let d = dayNames.length - 1; d >= 0; d--) {
+          for (let s = slots.length - 1; s >= 0; s--) {
+            const draw = getDraw(week, dayNames[d], slots[s]);
+            if (draw) {
+              leavingNumber = draw;
+              leavingSlot = slots[s];
+              break;
+            }
+          }
+          if (leavingNumber) break;
+        }
+        if (leavingNumber) break;
+      }
+    }
+
+    return { leavingNumber, leavingSlot };
+  }
+
+  const { leavingNumber, leavingSlot } = getLeavingNumber();
+
+  function getWeekDraws(week) {
+    const draws = [];
+    if (!week) return draws;
+    for (const day of dayNames) {
+      for (const slot of slots) {
+        const draw = getDraw(week, day, slot);
+        if (draw) draws.push(draw);
+      }
+    }
+    return draws;
+  }
+
+  const currentWeekDraws = getWeekDraws(currentWeek);
+
+  // ======================================
+  // ANALYZE LINE PULLS
+  // ======================================
+
+  function analyzeLinePulls() {
+    const results = [];
+    const leavingLine = leavingNumber ? getLine(leavingNumber) : null;
+
+    for (let line = 1; line <= 9; line++) {
+      const rule = lineRules[line];
+      if (!rule) continue;
+
+      const pulls = rule.pulls || [];
+      const pullLines = pulls.map(l => ({
+        line: l,
+        name: lineNames[l] || `Line ${l}`,
+        color: lineColors[(l - 1) % lineColors.length]
+      }));
+
+      const lineNumbers = Object.keys(numToLineMap)
+        .filter(key => numToLineMap[key] === line)
+        .map(Number);
+
+      const activeNumbers = lineNumbers.filter(n => currentWeekDraws.includes(n));
+      const isLeavingLine = leavingLine === line;
+
+      results.push({
+        line: line,
+        name: lineNames[line] || `Line ${line}`,
+        color: lineColors[(line - 1) % lineColors.length],
+        rule: rule,
+        pullLines: pullLines,
+        activeNumbers: activeNumbers,
+        isLeavingLine: isLeavingLine
+      });
+    }
+
+    return results;
+  }
+
+  const lineAnalysis = analyzeLinePulls();
+
+  // ======================================
+  // LINE STATS — LAST 24 WEEKS
+  // ======================================
+  const last24Weeks = sortedWeeks.slice(-24);
+
+  function getActualDateForDraw(week, dayName) {
+    if (!week || !week.startDate) return null;
+    const parts = week.startDate.split(" ");
+    const monthMap = {"Jan":0,"Feb":1,"Mar":2,"Apr":3,"May":4,"Jun":5,"Jul":6,"Aug":7,"Sep":8,"Oct":9,"Nov":10,"Dec":11};
+    const startDate = new Date(parts[2], monthMap[parts[1]], parseInt(parts[0]));
+    const dayIndex = dayNames.indexOf(dayName);
+    if (dayIndex === -1) return null;
+    const drawDate = new Date(startDate);
+    drawDate.setDate(startDate.getDate() + dayIndex);
+    return drawDate;
+  }
+
+  const numberStats = {};
+  for (let i = 1; i <= 36; i++) {
+    numberStats[i] = { count: 0, lastDate: null };
+  }
+
+  last24Weeks.forEach(week => {
+    dayNames.forEach(dayName => {
+      const actualDate = getActualDateForDraw(week, dayName);
+      slots.forEach(slot => {
+        const num = getDraw(week, dayName, slot);
+        if (num && numberStats[num]) {
+          numberStats[num].count++;
+          if (!numberStats[num].lastDate || actualDate > numberStats[num].lastDate) {
+            numberStats[num].lastDate = actualDate;
+          }
+        }
+      });
+    });
+  });
+
+  // Compute HITS per line = sum of all member counts over last 24 weeks
+  function getLineHits(line) {
+    const members = lineMembers[line] || [];
+    return members.reduce((sum, num) => sum + (numberStats[num]?.count || 0), 0);
+  }
+
+  function formatShortDate(date) {
+    if (!date) return "—";
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${date.getDate()} ${months[date.getMonth()]}`;
+  }
+
+  // ======================================
+  // RENDER: LINE RULES
+  // ======================================
+
+  function renderLineRules() {
+    let rowsHtml = '';
+
+    for (const item of lineAnalysis) {
+      const pullHtml = item.pullLines.map(pl => `
+        <span style="display: inline-block; padding: 1px 6px; border-radius: 3px; background: ${pl.color}33; color: ${pl.color}; font-weight: 700; font-size: 9px; margin: 0 2px;">
+          ${pl.name}
+        </span>
+      `).join('');
+
+      const activeHtml = item.activeNumbers.length > 0 ?
+        item.activeNumbers.map(n => `
+          <span style="display: inline-block; padding: 1px 4px; border-radius: 3px; background: ${item.color}33; color: ${item.color}; font-weight: 700; font-size: 9px; margin: 0 1px;">
+            ${n}${spiritEmoji[n] || ''}
+          </span>
+        `).join(' ') :
+        '<span style="color: var(--text-dim, #64748b); font-size: 8px;">None</span>';
+
+      const isActive = item.isLeavingLine;
+
+      rowsHtml += `
+        <div style="display: flex; align-items: center; padding: 3px 6px; border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.04)); ${isActive ? 'background: var(--card-bg, rgba(255,255,255,0.05)); border-left: 3px solid ' + item.color : ''}">
+          <div style="min-width: 60px; display: flex; align-items: center; gap: 4px;">
+            <span style="font-weight: 800; font-size: 11px; color: ${item.color};">${item.name}</span>
+            ${isActive ? '<span style="font-size: 7px; color: #ff9d00; font-weight: 700;">🟢⚡️</span>' : ''}
+          </div>
+          <div style="flex: 1; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+            <span style="font-size: 7px; color: var(--text-dim, #64748b); font-weight: 600;">→</span>
+            ${pullHtml}
+            <span style="font-size: 7px; color: var(--text-dim, #64748b); margin-left: 4px;">${item.rule.description || ''}</span>
+          </div>
+          <div style="font-size: 8px; color: var(--text-dim, #64748b); min-width: 60px; text-align: right;">
+            ${activeHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border-color, rgba(255,255,255,0.06));">
+        <div style="font-size: 10px; font-weight: 800; color: var(--text-main, #ff9d00); margin-bottom: 4px; text-align: center; letter-spacing: 0.3px;">
+          📊 LINE CHART RULES & MAPPING
+        </div>
+        <div style="background: var(--card-bg, rgba(255,255,255,0.02)); border-radius: 6px; overflow: hidden; border: 1px solid var(--border-color, rgba(255,255,255,0.04));">
+          ${rowsHtml}
+        </div>
+        <div style="font-size: 6px; color: var(--text-dim, #64748b); text-align: center; margin-top: 3px;">
+          Based on Play Whe line pull rules • Active numbers shown in current week
+        </div>
+      </div>
+    `;
+  }
+
+  // ======================================
+  // RENDER: LINE CHART — Compact, no leaving highlight
+  // Columns: LINE | HITS | MARKS CHART (merged 3 sub-columns)
+  // ======================================
+
+  function renderLineChart() {
+    const textColor = 'var(--text-main, #ffffff)';
+    const dimColor = 'var(--text-dim, #64748b)';
+
+    // Header row: LINE | HITS | MARKS CHART (colspan=3)
+    const headerHtml = `
+      <tr style="background: var(--header-bg, rgba(255,255,255,0.04));">
+        <th style="
+          padding:4px 4px;
+          text-align:center;
+          font-size:8px;
+          font-weight:800;
+          color:${textColor};
+          border-bottom:1px solid var(--border-color, rgba(255,255,255,0.1));
+          letter-spacing:0.4px;
+          width:38px;
+        ">LINE</th>
+        <th style="
+          padding:4px 4px;
+          text-align:center;
+          font-size:8px;
+          font-weight:800;
+          color:${textColor};
+          border-bottom:1px solid var(--border-color, rgba(255,255,255,0.1));
+          letter-spacing:0.4px;
+          width:38px;
+        ">HITS</th>
+        <th colspan="3" style="
+          padding:4px 4px;
+          text-align:center;
+          font-size:8px;
+          font-weight:800;
+          color:${textColor};
+          border-bottom:1px solid var(--border-color, rgba(255,255,255,0.1));
+          letter-spacing:0.4px;
+        ">MARKS CHART</th>
+      </tr>
+    `;
+
+    let bodyHtml = '';
+
+    // Member cell — compact, no leaving highlight
+    function makeMemberCell(num) {
+      const stats = numberStats[num] || { count: 0, lastDate: null };
+
+      return `
+        <div style="
+          display:flex;
+          flex-direction:column;
+          align-items:center;
+          justify-content:center;
+          padding:2px 2px;
+          border-radius:4px;
+          min-width:0;
+          flex:1;
+        ">
+          <span style="
+            font-size:11px;
+            font-weight:900;
+            color:${textColor};
+            line-height:1.1;
+          ">${num}</span>
+          <span style="
+            font-size:8px;
+            font-weight:700;
+            color:${textColor};
+            margin-top:1px;
+            line-height:1.1;
+          ">${stats.count}x</span>
+          <span style="
+            font-size:7px;
+            color:${dimColor};
+            margin-top:1px;
+            line-height:1.1;
+          ">${formatShortDate(stats.lastDate)}</span>
+        </div>
+      `;
+    }
+
+    for (let line = 1; line <= 9; line++) {
+      const members = lineMembers[line];
+      const hits = getLineHits(line);
+
+      bodyHtml += `
+        <tr>
+          <td style="
+            padding:3px 4px;
+            text-align:center;
+            font-size:11px;
+            font-weight:900;
+            color:${textColor};
+            border-bottom:1px solid var(--border-color, rgba(255,255,255,0.05));
+            vertical-align:middle;
+          ">${line} L</td>
+          <td style="
+            padding:3px 4px;
+            text-align:center;
+            font-size:11px;
+            font-weight:900;
+            color:${textColor};
+            border-bottom:1px solid var(--border-color, rgba(255,255,255,0.05));
+            vertical-align:middle;
+          ">${hits}x</td>
+          <td style="
+            padding:2px 3px;
+            border-bottom:1px solid var(--border-color, rgba(255,255,255,0.05));
+            vertical-align:middle;
+          ">
+            <div style="display:flex; gap:2px;">
+              ${makeMemberCell(members[0])}
+            </div>
+          </td>
+          <td style="
+            padding:2px 3px;
+            border-bottom:1px solid var(--border-color, rgba(255,255,255,0.05));
+            vertical-align:middle;
+          ">
+            <div style="display:flex; gap:2px;">
+              ${makeMemberCell(members[1])}
+            </div>
+          </td>
+          <td style="
+            padding:2px 3px;
+            border-bottom:1px solid var(--border-color, rgba(255,255,255,0.05));
+            vertical-align:middle;
+          ">
+            <div style="display:flex; gap:2px;">
+              ${makeMemberCell(members[2])}
+              ${makeMemberCell(members[3])}
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    return `
+      <div style="margin-top: 6px;">
+        <div style="
+          font-size:10px;
+          font-weight:800;
+          color:${textColor};
+          margin-bottom:4px;
+          text-align:center;
+          letter-spacing:0.4px;
+        ">📈 LINE CHART (LAST 24 WEEKS)</div>
+        <div style="
+          background: var(--card-bg, rgba(255,255,255,0.02));
+          border-radius:5px;
+          overflow:hidden;
+          border:1px solid var(--border-color, rgba(255,255,255,0.04));
+        ">
+          <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+            <table style="width:100%; border-collapse:collapse; font-size:10px; min-width:280px;">
+              <thead>${headerHtml}</thead>
+              <tbody>${bodyHtml}</tbody>
+            </table>
+          </div>
+        </div>
+        <div style="
+          font-size:6px;
+          color:${dimColor};
+          text-align:center;
+          margin-top:2px;
+        ">HITS = total line plays over last 24 weeks • #x = number's count • Date = last played (day month)</div>
+      </div>
+    `;
+  }
+
+  // ======================================
+  // BUILD THE HTML
+  // ======================================
+
+  const lineRulesHtml = renderLineRules();
+  const lineChartHtml = renderLineChart();
+
+  const thickDivider = `
+    <div style="
+      margin: 10px 0;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--text-main, #ffffff);
+    "></div>
+  `;
+
+  return `
+    <div style="
+      background: var(--bg-start, linear-gradient(135deg, #0f172a, #1e293b));
+      border-radius: 16px; 
+      padding: 10px; 
+      margin-bottom: 15px; 
+      border: 1px solid var(--border-color, #ff9d00);
+    ">
+      
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 4px;">
+        <div>
+          <div style="font-size: 13px; font-weight: 800; color: var(--text-main, #ff9d00); letter-spacing: 0.3px;">
+            ♠️ PLAY WHE LINE RULES & MAPPING
+          </div>
+          <div style="font-size: 7px; color: var(--text-dim, #64748b); margin-top: 1px;">
+            All 9 lines • Pull rules • Active numbers
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; font-size: 6px; color: var(--text-dim, #94a3b8);">
+          <span style="color: #ff9d00; font-weight: bold; font-size: 6px;">CWG ©️</span>
+        </div>
+      </div>
+      
+      <!-- Line Rules -->
+      ${lineRulesHtml}
+
+      <!-- Thick Divider (white / black) -->
+      ${thickDivider}
+
+      <!-- Line Chart (last 24 weeks) -->
+      ${lineChartHtml}
+      
+      <!-- Footer -->
+      <div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.02)); display: flex; justify-content: center; align-items: center; gap: 6px; flex-wrap: wrap;">
+        <span style="font-size: 6px; color: var(--text-dim, #64748b);">CodeWithGlasgow • CWG Chart Analysis ©️</span>
+        <span style="font-size: 6px; color: var(--text-dim, #64748b);">Updated: ${new Date().toLocaleDateString()}</span>
+      </div>
+      
+    </div>
+  `;
+}
+///////////////////////////////////////////
 
 /////////PK2 C.WKS PLAY///////////////////
 // ======================================
@@ -12275,11 +13106,17 @@ td {
 <!-- 1/16, 1/8, 1/9, 1/7, 1/5 Charts v2-->
   ${renderPlayWheFiveChartsv2(pw ? pw.weeks : [])}
   <br>
+   <!-- Line Rules & Mapping v2-->
+    ${renderPlayWheLineRulesMappingv2(pw ? pw.weeks : [])}
+    <br>
+   <!-- PlayWhe Shelf Marks Container -->
+  ${renderShelfContainer(pw ? pw.weeks : [])}
+  <br>
+   <!---- HOT or COLD Chart Analysis ---->
+  ${renderPlayWheHotColdMarksEnhanced(pw ? pw.weeks : [])}
+  <br>
   <!-- Day To Day Carousel Container -->
   ${renderCarouselWithCurrentGrid(pw, "pw")}
-  <br>
-  <!---- HOT or COLD Chart Analysis ---->
-  ${renderPlayWheHotColdMarksEnhanced(pw ? pw.weeks : [])}
   <br>
   <!-- Calendar Chart Play Container -->
   ${renderCalendarMonthDisplay(pw ? pw.weeks : [])}
@@ -12293,9 +13130,6 @@ ${renderChartPlayMapping(pw ? pw.weeks : [])}
   <!-- Chart Play Analysis Container -->
   ${generateChartPlayAnalysis(pw ? pw.weeks : [])}
   <br>
-  <!-- PlayWhe Shelf Marks Container -->
-  ${renderShelfContainer(pw ? pw.weeks : [])}
-  <br>
   <!-- Lines Chart Heat Map Tracking -->
   ${renderLSChart(
   `PLAY WHE LINES CHART (${dynamicStartHeader} — NOW) • Cycle ${pwCycleNum} • ${filteredPW.length}/36`,
@@ -12308,6 +13142,9 @@ ${renderChartPlayMapping(pw ? pw.weeks : [])}
   <!-- PlayWhe Readout Report Container -->
   ${generatePlayWheReadout(pw ? pw.weeks : [])}
   <br>
+  <!- 3 YR LOOK BACK CHART PW PKII PIKIV ->
+    ${renderThreeYearHistory(pw.weeks, p2.weeks, p4.weeks)}
+    <br>
   <!--Monthly Carousel Insight Container-->
   ${renderMonthlyCarousel(pw, "P2WHE", "PLAY WHE")}
   <br>
@@ -12334,6 +13171,9 @@ ${renderChartPlayMapping(pw ? pw.weeks : [])}
   "L", lines, p2LineStats, p2TotalHits, filteredP2.length, p2 ? p2.weeks : [], "PICK_2"
 )}
   <br>
+  <!- 3 YR LOOK BACK CHART PW PKII PIKIV ->
+    ${renderThreeYearHistory(pw.weeks, p2.weeks, p4.weeks)}
+    <br>
   ${renderMonthlyCarousel(p2, "PIKII", "PICK 2")}
   <br>
   ${renderComingUnderModalWeekly(p2 ? p2.weeks : [], "PICK 2", "PIKII")}
@@ -12359,6 +13199,9 @@ ${renderChartPlayMapping(pw ? pw.weeks : [])}
   )}
   <br>
   ${renderPick4CurrentWeekPlays(p4 ? p4.weeks : [])}
+    <br>
+  <!- 3 YR LOOK BACK CHART PW PKII PIKIV ->
+    ${renderThreeYearHistory(pw.weeks, p2.weeks, p4.weeks)}
     <br>
   ${renderMonthlyCarousel(p4, "PIKIV", "PICK 4")}
   <br>
