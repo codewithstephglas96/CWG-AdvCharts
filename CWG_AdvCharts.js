@@ -3,7 +3,7 @@
 // 6-GAME INTEGRATION WITH PERSISTENT LOGIC & ANIMATIONS
 // ADDED: Active Highlighting for Pick 2 & Pick 4 (matching combinations)
 // ADDED: Carousel for previous weeks/months ABOVE fixed current week/month
-// Last Modified: Sept 17 @ 2:15 pm
+// Last Modified: Sept 18 11:11 am
 //========================================
 const TICKER_URL = "https://script.google.com/macros/s/AKfycbymSUZ3cuBP7wZSKkxs8QmjMkKP6q3j-LOW_CVpY3n6Sw1EzsdwPu6yTEkpOmiAJz95/exec";
 const COMPARISON_API = "https://script.google.com/macros/s/AKfycbwyr-M_ZzIscNgxJmR_UYHgZqmamn62Np4msDFaCjX9KgyUmyjuzuIYbawBmT0_mw4j/exec?action=calendar";
@@ -3828,8 +3828,10 @@ function renderThreeYearHistory(pwWeeks, p2Weeks, p4Weeks) {
  * BOTTOM TABLE: Detailed Shelf Status of every number in the Leaving, Meeting, 
  *               and Pulling Lines.
  *               Columns: MARK | HITS | LAST PLAYED | PLAY | STATUS %
- * 
- * UPDATED: HITS column now counts occurrences over the LAST 24 WEEKS.
+ * PATTERN ANALYSIS: Articulates the full pattern logic including the most overdue 
+ *                   number across BOTH Leaving and Meeting pulling lines.
+ * PROBABILITY GRID: 2x3 grid showing the top 6 numbers best suited for
+ *                   the upcoming draw. Located inside the Pattern Analysis container.
  * 
  * @param {Array} weeksData - The array of week objects from your main app state.
  * @returns {string} HTML string for the container.
@@ -3931,6 +3933,7 @@ function renderPlayWheLineChartAnalysis(weeksData) {
   function getLeavingMeetingNumbers() {
     let leavingNumber = null, leavingSlot = null, leavingDate = null;
     let meetingNumber = null, meetingSlot = null, meetingDate = null;
+    let meetingWeekStart = null; 
     
     const todayIdx = now.getDay();
     const currentHour = now.getHours();
@@ -3994,6 +3997,7 @@ function renderPlayWheLineChartAnalysis(weeksData) {
         if (meetingNumber) {
           meetingSlot = targetSlot;
           meetingDate = getDateForDraw(previousWeek, targetDay);
+          meetingWeekStart = previousWeek.startDate;
         }
         
         if (!meetingNumber) {
@@ -4004,6 +4008,7 @@ function renderPlayWheLineChartAnalysis(weeksData) {
               meetingNumber = draw;
               meetingSlot = targetSlot;
               meetingDate = getDateForDraw(week, targetDay);
+              meetingWeekStart = week.startDate;
               break;
             }
           }
@@ -4015,15 +4020,16 @@ function renderPlayWheLineChartAnalysis(weeksData) {
             meetingNumber = draw;
             meetingSlot = targetSlot;
             meetingDate = getDateForDraw(currentWeek, targetDay);
+            meetingWeekStart = currentWeek.startDate;
           }
         }
       }
     }
     
-    return { leavingNumber, leavingSlot, leavingDate, meetingNumber, meetingSlot, meetingDate };
+    return { leavingNumber, leavingSlot, leavingDate, meetingNumber, meetingSlot, meetingDate, meetingWeekStart };
   }
 
-  const { leavingNumber, leavingSlot, leavingDate, meetingNumber, meetingSlot, meetingDate } = getLeavingMeetingNumbers();
+  const { leavingNumber, leavingSlot, leavingDate, meetingNumber, meetingSlot, meetingDate, meetingWeekStart } = getLeavingMeetingNumbers();
 
   const leavingLine = leavingNumber ? getLine(leavingNumber) : null;
   const meetingLine = meetingNumber ? getLine(meetingNumber) : null;
@@ -4050,12 +4056,11 @@ function renderPlayWheLineChartAnalysis(weeksData) {
   }
 
   // ======================================
-  // UPDATED: Calculate hits over the LAST 24 WEEKS
+  // Calculate hits over the LAST 24 WEEKS
   // ======================================
   const hits24Weeks = {};
   for (let i = 1; i <= 36; i++) hits24Weeks[i] = 0;
 
-  // Get the last 24 weeks of data
   const last24Weeks = sortedWeeks.slice(-24);
   last24Weeks.forEach(week => {
     for (const day of dayNames) {
@@ -4100,7 +4105,7 @@ function renderPlayWheLineChartAnalysis(weeksData) {
   // Calculate "Days Since Last Seen" and capture the exact draw details
   const daysSinceLastSeen = {};
   const lastPlayedDate = {};
-  const lastPlayedDetails = {}; // Stores { day, slot, dateObj, previousNum }
+  const lastPlayedDetails = {}; 
   
   for (let i = 1; i <= 36; i++) {
     let lastIdx = -1;
@@ -4115,7 +4120,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
       const record = allDrawsWithDates[lastIdx];
       const lastDate = record.date;
       
-      // Find the previous draw to get the "Play" sequence (#/#)
       let previousNum = null;
       if (lastIdx > 0) {
         previousNum = allDrawsWithDates[lastIdx - 1].num;
@@ -4135,6 +4139,104 @@ function renderPlayWheLineChartAnalysis(weeksData) {
   }
 
   // ======================================
+  // 2b. BUILD THE PROBABILITY ANALYSIS DATA
+  // ======================================
+  const candidateLines = new Set();
+  if (leavingLine) candidateLines.add(leavingLine);
+  if (leavingLine && lineRules[leavingLine]) {
+    lineRules[leavingLine].pulls.forEach(l => candidateLines.add(l));
+  }
+  if (meetingLine) candidateLines.add(meetingLine);
+  if (meetingLine && lineRules[meetingLine]) {
+    lineRules[meetingLine].pulls.forEach(l => candidateLines.add(l));
+  }
+
+  const candidateNumbers = [];
+  candidateLines.forEach(line => {
+    Object.keys(numToLineMap).forEach(key => {
+      const num = parseInt(key);
+      if (numToLineMap[num] === line) {
+        candidateNumbers.push(num);
+      }
+    });
+  });
+
+  const last24WeeksList = sortedWeeks.slice(-24);
+  const afterMeetingPlays = {}; 
+  
+  for (let i = 0; i < last24WeeksList.length; i++) {
+    const week = last24WeeksList[i];
+    const weekDraws = [];
+    for (const day of dayNames) {
+      for (const slot of slots) {
+        const draw = getDraw(week, day, slot);
+        if (draw) weekDraws.push(draw);
+      }
+    }
+    
+    for (let j = 0; j < weekDraws.length - 1; j++) {
+      if (weekDraws[j] === meetingNumber) {
+        const nextNum = weekDraws[j + 1];
+        afterMeetingPlays[nextNum] = (afterMeetingPlays[nextNum] || 0) + 1;
+      }
+    }
+  }
+
+  const scoredCandidates = candidateNumbers.map(num => {
+    const historicalPlays = afterMeetingPlays[num] || 0;
+    const shelfConf = daysSinceLastSeen[num] === 999 ? 0 : Math.min(Math.round((daysSinceLastSeen[num] / avgGap[num]) * 100), 100);
+    const hitFrequency = hits24Weeks[num] || 0;
+    const isPullLine = candidateLines.has(numToLineMap[num]) ? 10 : 0;
+    
+    const historicalScore = Math.min(historicalPlays * 8, 40); 
+    const shelfScore = (shelfConf / 100) * 30;
+    const hitScore = Math.min(hitFrequency * 2, 20);
+    
+    const totalScore = historicalScore + shelfScore + hitScore + isPullLine;
+    
+    return {
+      num,
+      line: numToLineMap[num],
+      lineName: lineNames[numToLineMap[num]],
+      lineColor: lineColors[(numToLineMap[num] - 1) % lineColors.length],
+      historicalPlays,
+      shelfConf,
+      hitFrequency,
+      totalScore,
+      lastDetails: lastPlayedDetails[num],
+      days: daysSinceLastSeen[num],
+      avg: avgGap[num]
+    };
+  });
+
+  scoredCandidates.sort((a, b) => b.totalScore - a.totalScore);
+  const top6Candidates = scoredCandidates.slice(0, 10);
+
+  let gridHtml = '';
+  top6Candidates.forEach((item, index) => {
+    let lastPlayedStr = "Never";
+    if (item.lastDetails) {
+      const d = item.lastDetails.date;
+      const dayNum = d.getDate();
+      const monthStr = monthNames[d.getMonth()];
+      lastPlayedStr = `${dayNum} ${monthStr}`;
+    }
+
+    let statusColor = "#ff9f0a";
+    if (item.shelfConf >= 100) statusColor = "#ff453a";
+    else if (item.shelfConf >= 75) statusColor = "#ffd60a";
+    
+    gridHtml += `
+      <div style="background: rgba(0,0,0,0.25); border-radius: 8px; padding: 6px; border: 1px solid ${item.lineColor}44; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; min-height: 70px;">
+        <div style="font-size: 13px; font-weight: 900; color: #fff; line-height: 1.1;">${item.num} ${spiritEmoji[item.num] || ''}</div>
+        <div style="font-size: 7px; color: ${item.lineColor}; font-weight: 700; margin-top: 1px;">${item.lineName}</div>
+        <div style="font-size: 8px; color: #cbd5e1; margin-top: 2px; font-weight: 700;">${item.hitFrequency}x • <span style="color: ${statusColor};">${item.shelfConf}%</span></div>
+        <div style="font-size: 7px; color: #64748b; margin-top: 1px;">${lastPlayedStr}</div>
+      </div>
+    `;
+  });
+
+  // ======================================
   // 3. BUILD THE TOP SECTION (LINE-LEVEL ANALYSIS)
   // ======================================
   let topSectionHtml = '';
@@ -4144,7 +4246,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
     const rule = lineRules[leavingLine];
     const pullLines = rule.pulls;
     
-    // We show the Leaving Line, Meeting Line, and all Pulling Lines
     const linesToShow = [leavingLine];
     if (meetingLine) linesToShow.push(meetingLine);
     pullLines.forEach(l => linesToShow.push(l));
@@ -4159,7 +4260,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
       const lineNumbers = Object.keys(numToLineMap).filter(key => numToLineMap[key] === line).map(Number);
       const color = lineColors[(line - 1) % lineColors.length];
       
-      // Determine line status based on the numbers within it
       let dueCount = 0;
       let warmCount = 0;
       let justPlayedCount = 0;
@@ -4217,7 +4317,7 @@ function renderPlayWheLineChartAnalysis(weeksData) {
   }
 
   // ======================================
-  // 3b. BUILD THE RULES BLOCK (UPDATED FOR MEETING LINE)
+  // 3b. BUILD THE RULES BLOCK
   // ======================================
   let rulesBlockHtml = '';
   if (leavingLine && lineRules[leavingLine]) {
@@ -4265,8 +4365,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
   
   let shelfTableRows = '';
   
-  // Determine which lines to include in the table
-  // We want: Leaving Line, Meeting Line, and all Pulling Lines
   const relevantLines = [leavingLine];
   if (meetingLine) relevantLines.push(meetingLine);
   if (leavingLine && lineRules[leavingLine]) {
@@ -4286,7 +4384,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
   
   const uniqueRelevantLines = [...new Set(relevantLines)];
   
-  // Collect all relevant numbers
   let relevantNumbers = [];
   uniqueRelevantLines.forEach(line => {
     const lineNumbers = Object.keys(numToLineMap).filter(key => numToLineMap[key] === line).map(Number);
@@ -4298,10 +4395,10 @@ function renderPlayWheLineChartAnalysis(weeksData) {
         lineColor: lineColors[(line - 1) % lineColors.length],
         days: daysSinceLastSeen[num],
         avg: avgGap[num],
-        hits: hits24Weeks[num] || 0, // UPDATED: Use 24-week hits
+        hits: hits24Weeks[num] || 0,
         lastDate: lastPlayedDate[num],
         lastDetails: lastPlayedDetails[num],
-        conf: Math.min(Math.round((daysSinceLastSeen[num] / avgGap[num]) * 100), 100),
+        conf: daysSinceLastSeen[num] === 999 ? 0 : Math.min(Math.round((daysSinceLastSeen[num] / avgGap[num]) * 100), 100),
         isLeaving: (num === leavingNumber),
         isMeeting: (num === meetingNumber),
         isPulling: (leavingLine && lineRules[leavingLine] && lineRules[leavingLine].pulls.includes(line))
@@ -4309,7 +4406,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
     });
   });
 
-  // Sort: Leaving number first, then Meeting number, then by confidence (most overdue first)
   relevantNumbers.sort((a, b) => {
     if (a.isLeaving) return -1;
     if (b.isLeaving) return 1;
@@ -4318,7 +4414,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
     return b.conf - a.conf;
   });
 
-  // Build rows for each number
   relevantNumbers.forEach(item => {
     let statusText = "PULL BACK";
     let statusColor = "#ff9f0a";
@@ -4337,7 +4432,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
       statusColor = "#ffd60a";
     }
 
-    // Format last played date and slot (e.g., "14 Aug • MOR")
     let lastPlayedStr = "Never";
     if (item.lastDetails) {
       const d = item.lastDetails.date;
@@ -4347,22 +4441,44 @@ function renderPlayWheLineChartAnalysis(weeksData) {
       lastPlayedStr = `${dayNum} ${monthStr} • ${slotStr}`;
     }
     
-    // Format the "Play" sequence (#/#)
     let playSequence = "—";
-    if (item.lastDetails && item.lastDetails.previousNum) {
+    if (item.isMeeting && meetingWeekStart) {
+      const meetingWeek = sortedWeeks.find(w => w.startDate === meetingWeekStart);
+      if (meetingWeek) {
+        let foundIdx = -1;
+        const meetingWeekDraws = [];
+        for (const day of dayNames) {
+          for (const slot of slots) {
+            const draw = getDraw(meetingWeek, day, slot);
+            if (draw) meetingWeekDraws.push(draw);
+          }
+        }
+        for (let i = meetingWeekDraws.length - 1; i >= 0; i--) {
+          if (meetingWeekDraws[i] === item.num) {
+            foundIdx = i;
+            break;
+          }
+        }
+        if (foundIdx > 0) {
+          playSequence = `${meetingWeekDraws[foundIdx - 1]}/${item.num}`;
+        } else if (foundIdx === 0) {
+          playSequence = `—/${item.num}`;
+        }
+      }
+    } else if (item.lastDetails && item.lastDetails.previousNum) {
       playSequence = `${item.lastDetails.previousNum}/${item.num}`;
     } else if (item.lastDetails) {
       playSequence = `—/${item.num}`;
     }
 
-    // Highlight Leaving and Meeting numbers
     let rowBg = "transparent";
     if (item.isLeaving) rowBg = "rgba(255, 157, 0, 0.1)";
     else if (item.isMeeting) rowBg = "rgba(30, 144, 255, 0.1)";
 
+    const onclickAttr = `onclick="if(typeof showNumberHistory === 'function') { showNumberHistory(${item.num}); } else { console.log('History for ${item.num}:', '${playSequence}'); }"`;
+
     shelfTableRows += `
-      <div style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; border-bottom: 1px solid rgba(255,255,255,0.03); background: ${rowBg};">
-        <!-- MARK (Number + Line) -->
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; border-bottom: 1px solid rgba(255,255,255,0.03); background: ${rowBg}; cursor: pointer;" ${onclickAttr}>
         <div style="min-width: 80px; display: flex; align-items: center; gap: 4px;">
           <span style="font-size: 11px; font-weight: 800; color: #fff;">${item.num} ${spiritEmoji[item.num] || ''}</span>
           <span style="font-size: 7px; color: ${item.lineColor}; font-weight: 700;">${item.lineName}</span>
@@ -4370,22 +4486,18 @@ function renderPlayWheLineChartAnalysis(weeksData) {
           ${item.isMeeting ? '<span style="font-size: 7px; color: #1e90ff;">⚡️🟢</span>' : ''}
         </div>
         
-        <!-- HITS (Last 24 Weeks) -->
         <div style="min-width: 30px; text-align: center;">
           <span style="font-size: 10px; font-weight: 700; color: ${item.hits > 0 ? '#fff' : '#64748b'};">${item.hits}</span>
         </div>
 
-        <!-- LAST PLAYED (Date + Slot) -->
         <div style="min-width: 70px; text-align: center; font-size: 9px; color: #cbd5e1;">
           ${lastPlayedStr}
         </div>
 
-        <!-- PLAY (Previous/Current Sequence) -->
         <div style="min-width: 50px; text-align: center; font-size: 9px; color: #94a3b8;">
           ${playSequence}
         </div>
 
-        <!-- STATUS % (Confidence + Status) -->
         <div style="min-width: 60px; text-align: right;">
           <div style="font-size: 9px; font-weight: 900; color: ${statusColor};">${item.conf}%</div>
           <div style="font-size: 6px; color: ${statusColor}; letter-spacing: 0.5px;">${statusText}</div>
@@ -4395,17 +4507,21 @@ function renderPlayWheLineChartAnalysis(weeksData) {
   });
 
   // ======================================
-  // 5. ARTICULATE THE PATTERN (UPDATED FOR MEETING LINE)
+  // 5. ARTICULATE THE PATTERN (EXPANDED TO INCLUDE MEETING LINE PULLS)
   // ======================================
   let patternText = "Awaiting data...";
   if (leavingLine && lineRules[leavingLine]) {
     const rule = lineRules[leavingLine];
     const pullNames = rule.pulls.map(l => lineNames[l]).join(" and ");
     
-    // Find the most overdue number overall in the pulling lines of the Leaving Line
+    // ======================================
+    // EXPANDED: Find most overdue number across BOTH Leaving AND Meeting pulling lines
+    // ======================================
     let mostOverdueNum = null;
     let maxOverdueRatio = 0;
+    let mostOverdueSource = ""; // Track which line pool the number came from
     
+    // 1. Check Leaving Line's pulling lines
     rule.pulls.forEach(pullLine => {
       const lineNumbers = Object.keys(numToLineMap).filter(key => numToLineMap[key] === pullLine).map(Number);
       lineNumbers.forEach(num => {
@@ -4413,29 +4529,44 @@ function renderPlayWheLineChartAnalysis(weeksData) {
         if (ratio > maxOverdueRatio) {
           maxOverdueRatio = ratio;
           mostOverdueNum = num;
+          mostOverdueSource = "Leaving";
         }
       });
     });
+    
+    // 2. Check Meeting Line's pulling lines (if a meeting line exists)
+    if (meetingLine && lineRules[meetingLine]) {
+      lineRules[meetingLine].pulls.forEach(pullLine => {
+        const lineNumbers = Object.keys(numToLineMap).filter(key => numToLineMap[key] === pullLine).map(Number);
+        lineNumbers.forEach(num => {
+          const ratio = daysSinceLastSeen[num] / avgGap[num];
+          if (ratio > maxOverdueRatio) {
+            maxOverdueRatio = ratio;
+            mostOverdueNum = num;
+            mostOverdueSource = "Meeting";
+          }
+        });
+      });
+    }
 
     patternText = `The <b>${lineNames[leavingLine]}</b> (${leavingNumber}) is leaving.`;
     if (meetingLine) {
       patternText += ` It is meeting the <b>${lineNames[meetingLine]}</b> (${meetingNumber}).`;
     }
     
-    // Articulate Leaving Line Rule
     patternText += ` Based on the Play Whe Line Rules, the Leaving Line is pulling <b>${pullNames}</b>. ${rule.description}.`;
     
-    // Articulate Meeting Line Rule
     if (meetingLine && lineRules[meetingLine]) {
       const meetingRule = lineRules[meetingLine];
       const meetingPullNames = meetingRule.pulls.map(l => lineNames[l]).join(" and ");
       patternText += ` The Meeting Line (${lineNames[meetingLine]}) is also pulling <b>${meetingPullNames}</b>. ${meetingRule.description}.`;
     }
     
+    // Expanded: Now states which pool the most overdue number came from
     if (mostOverdueNum) {
-      patternText += ` The most overdue number in the pulling lines is <b>${mostOverdueNum} ${spiritEmoji[mostOverdueNum] || ''}</b> (${daysSinceLastSeen[mostOverdueNum]} days since last seen, avg gap ${avgGap[mostOverdueNum]} days). This is a strong <b>Pull Back</b> candidate.`;
+      patternText += ` The most overdue number across both the Leaving and Meeting pulling lines is <b>${mostOverdueNum} ${spiritEmoji[mostOverdueNum] || ''}</b> (${daysSinceLastSeen[mostOverdueNum]} days since last seen, avg gap ${avgGap[mostOverdueNum]} days) from the <b>${mostOverdueSource} Line's pull pool</b>. This is a strong <b>Pull Back</b> mark.`;
     } else {
-      patternText += ` No strong pull back candidates found in the pulling lines right now.`;
+      patternText += ` No strong pull back marks found in the pulling lines right now.`;
     }
   }
 
@@ -4554,11 +4685,25 @@ function renderPlayWheLineChartAnalysis(weeksData) {
       .shelf-table-header span:nth-child(3) { min-width: 70px; text-align: center; }
       .shelf-table-header span:nth-child(4) { min-width: 50px; text-align: center; }
       .shelf-table-header span:nth-child(5) { min-width: 60px; text-align: right; }
+      .probability-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .probability-grid-title {
+        font-size: 8px;
+        color: #1e90ff;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 10px;
+        margin-bottom: 4px;
+      }
     </style>
 
     <div class="line-analysis-container">
       
-      <!-- HEADER -->
       <div class="line-analysis-header">
         <div>
           <div class="line-analysis-title">📈 LINE CHART ANALYSIS</div>
@@ -4576,7 +4721,6 @@ function renderPlayWheLineChartAnalysis(weeksData) {
         </div>
       </div>
 
-  <!-- TOP SECTION: LINE-LEVEL ANALYSIS -->
       <div style="font-size: 8px; color: #64748b; font-weight: 700; text-transform: uppercase; margin-bottom: 6px; padding-left: 4px;">
         Line Analysis
       </div>
@@ -4584,10 +4728,8 @@ function renderPlayWheLineChartAnalysis(weeksData) {
         ${topSectionHtml}
       </div>
 
-     <!-- RULES BLOCK (MEETING LINE) -->
       ${rulesBlockHtml}
 
-      <!-- BOTTOM TABLE: SHELF STATUS -->
       <div class="shelf-table-header">
         <span>MARK</span>
         <span>HITS</span>
@@ -4599,12 +4741,15 @@ function renderPlayWheLineChartAnalysis(weeksData) {
         ${shelfTableRows}
       </div>
 
-  <!-- PATTERN ARTICULATION (MEETING LINE) -->
+      <!-- PATTERN ANALYSIS CONTAINER (Expanded to include Meeting Line pulls) -->
       <div class="line-analysis-pattern">
         <b>Pattern Analysis:</b> ${patternText}
+        
+        <div class="probability-grid">
+          ${gridHtml}
+        </div>
       </div>
 
-      <!-- FOOTER -->
       <div class="line-analysis-footer">
         CODEWITHGLASGOW 🌐 LINE CHART ANALYSIS • ${new Date().toLocaleDateString()}
       </div>
